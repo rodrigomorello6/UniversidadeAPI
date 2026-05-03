@@ -14,41 +14,45 @@ namespace UniversidadeAPI
 {
     public class Program
     {
+        private const string AngularCorsPolicy = "AngularApp";
+
         public static void Main(string[] args)
         {
             var builder = WebApplication.CreateBuilder(args);
 
-            // --- 1. CONFIGURAÇÃO DA CONEXÃO DB ---
             var connectionString = builder.Configuration.GetConnectionString("DefaultConnection")
-                ?? throw new InvalidOperationException("A string de conexão 'DefaultConnection' não foi encontrada.");
+                ?? throw new InvalidOperationException("A string de conexÃ£o 'DefaultConnection' nÃ£o foi encontrada.");
 
             builder.Services.AddControllers();
 
-            builder.Services.AddFluentValidationAutoValidation(); 
+            builder.Services.AddFluentValidationAutoValidation();
             builder.Services.AddValidatorsFromAssemblyContaining<Program>();
 
-            // --- 2. CONFIGURAÇÃO DO CORS (NOVO!) ---
-            // Isso permite que o Angular (localhost:4200) acesse esta API
+            var corsOrigins = builder.Configuration
+                .GetSection("Cors:AllowedOrigins")
+                .Get<string[]>()
+                ?? new[]
+                {
+                    "http://localhost:4200",
+                    "https://localhost:4200",
+                    "http://127.0.0.1:4200",
+                    "https://127.0.0.1:4200"
+                };
+
             builder.Services.AddCors(options =>
             {
-                options.AddPolicy("AngularApp", policy =>
+                options.AddPolicy(AngularCorsPolicy, policy =>
                 {
-                    policy.WithOrigins("http://localhost:4200") // URL do seu Angular
+                    policy.WithOrigins(corsOrigins)
                           .AllowAnyHeader()
                           .AllowAnyMethod();
                 });
             });
 
-            // Injeção de Dependência do MySQL (Dapper)
-            builder.Services.AddScoped<IDbConnection>(provider =>
-            {
-                return new MySqlConnection(connectionString);
-            });
+            builder.Services.AddScoped<IDbConnection>(_ => new MySqlConnection(connectionString));
 
-            // --- 3. INJEÇÃO DE DEPENDÊNCIAS (REPOSITÓRIOS E SERVIÇOS) ---
             builder.Services.AddSingleton<ITokenService, TokenService>();
 
-            // Repositórios
             builder.Services.AddScoped<IUsuarioRepository, UsuarioRepository>();
             builder.Services.AddScoped<IDepartamentoRepository, DepartamentoRepository>();
             builder.Services.AddScoped<IAlunoRepository, AlunoRepository>();
@@ -67,7 +71,6 @@ namespace UniversidadeAPI
 
             builder.Services.AddAutoMapper(typeof(Program));
 
-            // --- 4. CONFIGURAÇÃO DO SWAGGER ---
             builder.Services.AddEndpointsApiExplorer();
             builder.Services.AddSwaggerGen(c =>
             {
@@ -94,14 +97,13 @@ namespace UniversidadeAPI
                                 Id = "Bearer"
                             }
                         },
-                        new string[] {}
+                        Array.Empty<string>()
                     }
                 });
             });
 
-            // --- 5. CONFIGURAÇÃO JWT ---
             var jwtSettings = builder.Configuration.GetSection("Jwt");
-            var key = jwtSettings["Key"] ?? throw new InvalidOperationException("Chave JWT não configurada.");
+            _ = jwtSettings["Key"] ?? throw new InvalidOperationException("Chave JWT nÃ£o configurada.");
 
             builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
                 .AddJwtBearer(options =>
@@ -114,7 +116,7 @@ namespace UniversidadeAPI
                         ValidateIssuerSigningKey = true,
                         ValidIssuer = builder.Configuration["Jwt:Issuer"],
                         ValidAudience = builder.Configuration["Jwt:Audience"],
-                        IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(builder.Configuration["Jwt:Key"]))
+                        IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(builder.Configuration["Jwt:Key"]!))
                     };
                 });
 
@@ -122,18 +124,18 @@ namespace UniversidadeAPI
 
             var app = builder.Build();
 
-            // --- 6. PIPELINE DE EXECUÇÃO ---
-
             if (app.Environment.IsDevelopment())
             {
                 app.UseSwagger();
                 app.UseSwaggerUI();
             }
 
-            app.UseHttpsRedirection();
+            if (!app.Environment.IsDevelopment())
+            {
+                app.UseHttpsRedirection();
+            }
 
-            
-            app.UseCors("AngularApp");
+            app.UseCors(AngularCorsPolicy);
 
             app.UseAuthentication();
             app.UseAuthorization();
